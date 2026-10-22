@@ -1,40 +1,141 @@
-# Whisper Live LT v2 – Žodžiai iš Ąžuolo, skyryba atskirai
+# Whisper Live LT v2 – Ąžuolas, žodžių taisymas ir skyryba
 
-## Ubuntu (192.168.68.110)
+Lietuviška kalbos transkripcija iš mikrofono (gyvai) arba iš garso failo (offline):
+
+1. **Whisper (Ąžuolas)** – atpažįsta žodžius (GPU).
+2. **Žodžių taisymas (LT-Checker)** – žodyne nerastą žodį pakeičia pirmu pasiūlymu (CPU).
+3. **Skyrybos atkūrimas** – prideda `. , ? : -` ir sakinio pradžios didžiąją raidę, žodžių nekeičia (CPU).
+
+2 ir 3 žingsniai neprivalomi, įjungiami atskirai.
+
+## Failai
+
+| Failas | Paskirtis |
+|---|---|
+| `server.py` | Gyvos transkripcijos WebSocket serveris (`/ws/transcribe`) |
+| `transcribe.py` | Offline garso failo transkripcija į tekstinį failą |
+| `lt_spell.py` | Žodžių tikrinimas ir taisymas (LT-Checker C# logika, perkelta į Python) |
+| `punctuation.py` | Skyrybos atkūrimas (`Horizon-Labs/punctuation-restoration-small`) |
+| `index.html`, `pcm-worklet.js` | Web klientas (mikrofonas → serveris) |
+| `LT-Checker/` | LT-Checker repozitorija; naudojami tik `data/dict.bin` ir `data/lt_freq.bin` (į git neįtraukta) |
+
+## Ubuntu serveris (mp-dl, 192.168.68.110)
+
+### Paruošimas
 
 ```bash
 source ~/whisper-env/bin/activate
 pip install -U 'transformers>=4.57,<5' torch
-mkdir -p ~/whisper-live
-# Extract ZIP; copy whisper_live_lt_v2/server.py and punctuation.py into ~/whisper-live
-cd ~/whisper-live
-python -c "from punctuation import Punctuator; p=Punctuator(); print(p('labas rytas ar tu mane girdi šiandien yra graži diena'))"
+cd ~/whisper/v2
+git clone <LT-Checker repo> LT-Checker   # reikia LT-Checker/data/dict.bin ir lt_freq.bin
+```
+
+Whisper modelis: `/home/mp/whisper-models/azuolas-ct2` (`MODEL_NAME` faile `server.py`, `--model` – `transcribe.py`).
+Skyrybos modelis atsisiunčiamas per pirmą paleidimą (~140M parametrų).
+
+### Gyvas serveris
+
+```bash
+source ~/whisper-env/bin/activate
+cd ~/whisper/v2
 uvicorn server:app --host 0.0.0.0 --port 8001
 ```
 
-`server.py` currently points to `/home/mp/whisper-models/azuolas-ct2`. Change `MODEL_NAME` if your model lives elsewhere.
+Startas: Whisper modelis į GPU (~4,1 GB VRAM), LT-Checker žodynas (~5 s, ~430 MB RAM), skyrybos modelis (CPU).
+Pakeitus `server.py` arba `lt_spell.py`, serverį reikia perkrauti (Ctrl+C ir paleisti iš naujo).
 
-The first launch downloads `Horizon-Labs/punctuation-restoration-small` (~140M parameters). It runs on CPU and requires additional system RAM. It does not run a language model to rewrite words.
+### Offline transkripcija
 
-## Windows
+```bash
+source ~/whisper-env/bin/activate
+cd ~/whisper/v2
+python transcribe.py ../audio.mp3 rezultatas.txt --spell --punct
+```
 
-Copy `index.html` and `pcm-worklet.js` to `C:\Mazho\AI\Audio\whisper_live_lt_v2` and run:
+| Parametras | Reikšmė |
+|---|---|
+| `input` | Garso failas (mp3, wav, …) |
+| `output` | Rezultato tekstinis failas (UTF-8) |
+| `--spell` | Taisyti žodyne nerastus žodžius (LT-Checker) |
+| `--punct` | Įjungti skyrybos atkūrimą (be žodžių taisymo) |
+| `--no-timestamps` | Nerašyti `[pradžia - pabaiga]` prie segmentų |
+| `--model` | Kitas Whisper modelis (numatytasis – Ąžuolas) |
+
+Kiekvienas segmentas rašomas atskiroje eilutėje: `[0.08 - 23.78] tekstas`. Eilutės į failą rašomos iš karto, tad eigą matyti ekrane.
+Su `--spell` ekrane rodomi visi pakeitimai (`lietuva -> Lietuva`) ir jų skaičius; į failą rašomas tik galutinis tekstas.
+Jei tuo metu veikia ir gyvas serveris, GPU bus du Whisper modeliai – gali pritrūkti VRAM (8 GB).
+
+## Windows klientas
+
+Nukopijuokite `index.html` ir `pcm-worklet.js` į `C:\Mazho\AI\Audio\whisper_live_lt_v2` ir paleiskite:
 
 ```powershell
 cd C:\Mazho\AI\Audio\whisper_live_lt_v2
 python -m http.server 5500 --bind 127.0.0.1
 ```
 
-Open http://localhost:5500/index.html (not file://). `index.html` uses `ws://192.168.68.110:8001/ws/transcribe`.
+Atidarykite http://localhost:5500/index.html (ne `file://`). Serverio adresas: `ws://192.168.68.110:8001/ws/transcribe` (`URL` faile `index.html`).
+Atnaujinus `index.html`, puslapį perkraukite su Ctrl+F5.
 
-Check/uncheck "Įjungti skyrybos atkūrimą" to control processing for *newly finalized* segments. The original text is always visible. Prior finalized segments only get punctuation if the checkbox was checked when the segment was finalized.
+| Valdiklis | Veikimas |
+|---|---|
+| **Pradėti / Sustabdyti** | Mikrofono įrašymas |
+| **Išvalyti** | Išvalo tekstą, įrašymas tęsiasi (puslapio perkrauti nereikia) |
+| **Taisyti žodyne nerastus žodžius** | Įjungta pagal nutylėjimą; rodo stulpelį „Pataisyti žodžiai“ |
+| **Įjungti skyrybos atkūrimą** | Rodo stulpelį „Su skyrybos ženklais“ |
 
-For WAN/public access, add TLS (HTTPS/WSS) and authentication.
+* **Originali transkripcija** – visada tiksliai tai, ką atpažino Whisper.
+* **Pataisyti žodžiai** – pakeisti žodžiai pažymėti geltonai; užvedus pelę rodoma „Buvo: …“.
+* **Su skyrybos ženklais** – skyryba taikoma jau pataisytam tekstui.
+* Varnelės veikia tik **naujiems** segmentams, ankstesni neperskaičiuojami.
+* Puslapis automatiškai slenka prie naujausio teksto, kol esate apačioje; pakilus aukščiau – nejuda.
 
-## Notes
+Viešam (WAN) naudojimui reikia TLS (HTTPS/WSS) ir autentifikacijos.
 
-* The punctuation model predicts `. , ? : -`, no grammatical correction, no restoration of proper-name capitalization.
-* Sentence-initial capitalization is a separate deterministic step and does not alter word spelling beyond the first letter.
-* Small-word-chunk tagging can make mistakes at chunk/phrase boundaries; compare against the raw pane.
-* `MAX_UTTERANCE` segments are forcibly finalized without cross-boundary reconciliation, like the previous prototype.
-* Dependencies were syntax-checked. Model inference requires downloading model files and must be checked on your machine.
+## Sakinio pabaigos laikas (`server.py`)
+
+| Parametras | Reikšmė | Paaiškinimas |
+|---|---|---|
+| `CHECK_EVERY` | 0.4 s | Kaip dažnai tikrinama, ar baigėsi kalba |
+| `FINAL_SILENCE` | 0.7 s | Tylos trukmė, po kurios segmentas laikomas baigtu |
+| `PARTIAL_EVERY` | 2.0 s | Kaip dažnai rodomas tarpinis (pilkas) tekstas |
+| `MAX_UTTERANCE` | 30 s | Ilgesnis segmentas baigiamas priverstinai |
+
+Nuo kalbos pabaigos iki galutinio segmento – apie 0,85–1,25 s + Whisper apdorojimas.
+`FINAL_SILENCE` nemažinkite žemiau ~0,5 s (VAD `min_silence_duration_ms=500`) – sakiniai bus karpomi per įprastas pauzes.
+Trumpesni segmentai = mažiau konteksto Whisper ir skyrybai; jei karpo per dažnai, bandykite 0,8 s.
+
+## Žodžių taisymas (`lt_spell.py`)
+
+Perkelta iš LT-Checker C#: `DictionaryBinaryReader` + `WordAnalyzer` (morfologija, `IsAllowed`, pavardžių atpažinimas pagal galūnę), `SuggestionIndex` (pasiūlymai), `TrySplitGluedWord` (sulipę žodžiai). Sakinio kontekstas (derinimas su kitais žodžiais) nenaudojamas.
+
+**Žodis laikomas teisingu**, jei jį atpažįsta morfologija (`dict.bin`) arba jis tiksliai yra `lt_freq.bin`.
+**Nežinomas žodis** pakeičiamas pirmu pasiūlymu (atstumas ≤ 2 raidės); jei pasiūlymo nėra – paliekamas.
+
+**Nekeičiami:**
+* VISOS DIDŽIOSIOS raidės, žodžiai su skaitmenimis, skaičiai, eilės skaitvardžiai (`5-asis`);
+* žinomos santrumpos (`SentenceTokenizer.Abbreviations` sąrašas iš C#);
+* žodžiai su didžiąja raide viduryje (`McDonald`), URL / el. pašto dalys.
+
+**Skirtumai nuo C#** (ten pasiūlymus renkasi žmogus, čia – automatiškai):
+* žodžių dažnis rangavimui nenaudojamas (`USE_FREQUENCY = False`);
+* `lt_freq.bin` žodžiai su dažniu < 5 nekraunami (`MIN_SUGGESTION_FREQUENCY`) – greitesnis startas, mažiau RAM, mažiau šiukšlių;
+* pakeitimas niekada nebūna VISOMIS DIDŽIOSIOMIS;
+* žodis be morfologijos patvirtinimo siūlomas tik kaip raidžių dydžio pataisa (`rusija` → `Rusija`);
+* skaidant sulipusį žodį abi dalys turi būti žinomos morfologijai ir ≥ 3 raidžių (išskyrus aš, ir, be, su, …);
+* tik raidžių dydžiu ar diakritikais besiskiriantis variantas turi pirmenybę prieš skaidymą;
+* išimta C# taisyklė, priimdavusi mažąja raide parašytą tikrinį daiktavardį su daugiskaitos analize (`lietuvos` dabar → `Lietuvos`).
+
+Patikrinti atskirus žodžius ar tekstą:
+
+```bash
+python lt_spell.py "šiandien lietuva yra viena iš pirmųjų europos sąjungos šalių"
+```
+
+## Žinomi apribojimai
+
+* **Žodyno spragos** – žodis, kurio nėra `dict.bin` (pvz. `retkarčiais`, `Velykos`), pakeičiamas artimiausiu žinomu (`renkančiais`, `vėlyvos`). Taisyti reikia LT-Checker žodyne.
+* **Vardai be morfologijos** (`Larsas`, `Makronas`) turi mažą dažnį `lt_freq.bin` ir nebekraunami – keičiami į panašų žodį (`barsas`, `mikronas`).
+* **Lygiaverčiai pasiūlymai** – be dažnio ir konteksto pasirinkimas tarp vienodo balo kandidatų atsitiktinis (`aistrui` → `bistrui`).
+* **Skyryba** – taikoma kiekvienam segmentui atskirai (60 žodžių langais), gali klysti ties ribomis; tikrinių vardų didžiųjų raidžių neatkuria (tai daro žodžių taisymas).
+* `MAX_UTTERANCE` segmentai baigiami priverstinai, be suderinimo per ribą.
