@@ -20,6 +20,8 @@ DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'LT-Checker'
 NO_PREFIX = 105
 # First iteration: corpus word frequency is not used for ranking suggestions.
 USE_FREQUENCY = False
+# lt_freq.bin words seen fewer times are mostly noise ("žųsis 1") and are not loaded.
+MIN_SUGGESTION_FREQUENCY = 5
 
 
 class _BinReader:
@@ -276,18 +278,29 @@ class SuggestionIndex:
         version = r.i32()
         if version != 1:
             raise ValueError('Nepalaikoma lt_freq.bin versija: %d' % version)
-        count = r.i32()
-        words, norms = [None] * count, [None] * count
-        freq = np.zeros(count, dtype=np.int32)
-        morph = np.zeros(count, dtype=bool)
-        for i in range(count):
+        # Words below MIN_SUGGESTION_FREQUENCY are not loaded at all. Morphology
+        # words are sorted by frequency (descending), so the first rare one ends
+        # the load; lexicon-only words have reduced frequencies interleaved
+        # (SuggestionLexiconBuilder), so rare ones are only skipped.
+        words, norms, freq, morph = [], [], [], []
+        for _ in range(r.i32()):
             r.i32()
-            words[i] = r.string()
+            word = r.string()
             norm = r.string()
-            norms[i] = norm if norm else words[i].strip().lower()
-            freq[i] = r.i32()
-            morph[i] = r.boolean()
-        self.words, self.norms, self.freq, self.morph = words, norms, freq, morph
+            f = r.i32()
+            m = r.boolean()
+            if f < MIN_SUGGESTION_FREQUENCY:
+                if m:
+                    break
+                continue
+            words.append(word)
+            norms.append(norm if norm else word.strip().lower())
+            freq.append(f)
+            morph.append(m)
+        count = len(words)
+        self.words, self.norms = words, norms
+        self.freq = np.asarray(freq, dtype=np.int32)
+        self.morph = np.asarray(morph, dtype=bool)
         self.exact = set(words)
         self.lengths = np.fromiter((len(n) for n in norms), dtype=np.int16, count=count)
 
@@ -447,17 +460,13 @@ class Corrector:
                    for s, rid, _ in self._analyses(word))
 
     def _morph_known(self, word, allow_synthetic=True):
-        # SpellCheckService.ComputeInputAnalyses (+ capitalized plural retry in CheckWord).
+        # SpellCheckService.ComputeInputAnalyses. CheckWord's "capitalized plural"
+        # retry is left out on purpose: it accepted "lietuvos" ("Lietuvos" has a
+        # plural analysis), but lowercase proper nouns from ASR must be fixed.
         if self._has_exact_case(word, allow_synthetic):
             return True
         lower = word.lower()
-        if lower != word and self._has_exact_case(lower, allow_synthetic):
-            return True
-        if word[0].islower():
-            cap = word[0].upper() + word[1:]
-            if any(s == cap and rid >= 0 and dgs == 2 for s, rid, dgs in self._analyses(cap)):
-                return True
-        return False
+        return lower != word and self._has_exact_case(lower, allow_synthetic)
 
     def is_known(self, word):
         if word in self.index:
