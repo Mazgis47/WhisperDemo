@@ -18,9 +18,9 @@ log = logging.getLogger('whisper-live')
 SAMPLE_RATE = 16000
 LANGUAGE = 'lt'
 MODEL_NAME = '/home/mp/whisper-models/azuolas-ct2'
-CHECK_EVERY = 1.2
+CHECK_EVERY = 0.4
 PARTIAL_EVERY = 2.0
-FINAL_SILENCE = 0.95
+FINAL_SILENCE = 0.7
 MAX_UTTERANCE = 30.0
 MIN_AUDIO = 0.8
 
