@@ -4,19 +4,21 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Whisper – gyva transkripcija</title>
 <style>
-body{font:17px system-ui;max-width:900px;margin:35px auto;padding:16px;line-height:1.5}
+body{font:17px system-ui;max-width:1300px;margin:35px auto;padding:16px;line-height:1.5}
 button{padding:10px 18px;margin-right:8px;cursor:pointer}
 pre{font:inherit;white-space:pre-wrap;overflow-wrap:anywhere}
 #partial{color:#777;font-style:italic}#status{font-size:14px;color:#555}
-.columns{display:grid;grid-template-columns:1fr 1fr;gap:24px}
-@media(max-width:700px){.columns{grid-template-columns:1fr}}
+mark{background:#fff1a8;border-radius:3px;cursor:help}
+.columns{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:24px}
 </style></head><body>
 <h2>Gyva transkripcija – Ąžuolas</h2>
 <p><button id="start">Pradėti</button><button id="stop" disabled>Sustabdyti</button></p>
+<p><label><input type="checkbox" id="spell" checked> Taisyti žodyne nerastus žodžius (LT-Checker)</label></p>
 <p><label><input type="checkbox" id="punct"> Įjungti skyrybos atkūrimą (be žodžių taisymo)</label></p>
 <p id="status">Neprisijungta</p>
 <div class="columns">
 <section><h3>Originali transkripcija</h3><pre id="raw"></pre><div id="partial"></div></section>
+<section id="fixedColumn"><h3>Pataisyti žodžiai</h3><pre id="fixed"></pre></section>
 <section id="formattedColumn" hidden><h3>Su skyrybos ženklais</h3><pre id="formatted"></pre></section>
 </div>
 <script>
@@ -29,13 +31,35 @@ const partial = document.getElementById('partial');
 const formatted = document.getElementById('formatted');
 const punct = document.getElementById('punct');
 const formattedColumn = document.getElementById('formattedColumn');
+const fixed = document.getElementById('fixed');
+const spell = document.getElementById('spell');
+const fixedColumn = document.getElementById('fixedColumn');
 let ws, stream, ctx, source, node, silent, stopping = false;
 const records = new Map();
 
-function render() {
-  raw.textContent = [...records.values()].map(r => r.raw).join(' ');
-  formatted.textContent = [...records.values()].map(r => r.punct || r.raw).join(' ');
+function renderFixed(r) {
+  const frag = document.createDocumentFragment();
+  for (const [text, original] of r.pieces || [[r.text, null]]) {
+    if (original === null) { frag.append(text); continue; }
+    const m = document.createElement('mark');
+    m.textContent = text; m.title = 'Buvo: ' + original;
+    frag.append(m);
+  }
+  return frag;
 }
+function render() {
+  const list = [...records.values()];
+  raw.textContent = list.map(r => r.raw).join(' ');
+  fixed.replaceChildren();
+  list.forEach((r, i) => { if (i) fixed.append(' '); fixed.append(renderFixed(r)); });
+  formatted.textContent = list.map(r => r.punct || r.text).join(' ');
+}
+function setSpelling(enabled) {
+  fixedColumn.hidden = !enabled;
+  if (ws?.readyState === WebSocket.OPEN)
+    ws.send(enabled ? 'spelling_on' : 'spelling_off');
+}
+spell.onchange = () => setSpelling(spell.checked);
 function setPunctuation(enabled) {
   formattedColumn.hidden = !enabled;
   if (ws?.readyState === WebSocket.OPEN)
@@ -51,7 +75,7 @@ async function cleanup() {
 start.onclick = async () => {
   try {
     stopping = false;
-    records.clear(); raw.textContent = ''; formatted.textContent = '';
+    records.clear(); raw.textContent = ''; formatted.textContent = ''; fixed.textContent = '';
     partial.textContent = '';
     stream = await navigator.mediaDevices.getUserMedia({audio: {
       echoCancellation: false, noiseSuppression: false, autoGainControl: false
@@ -68,6 +92,7 @@ start.onclick = async () => {
       if (ws.readyState === WebSocket.OPEN && !stopping) ws.send(ev.data);
     };
     ws.onopen = () => {
+      setSpelling(spell.checked);
       setPunctuation(punct.checked);
       status.textContent = 'Klausomasi…';
       start.disabled = true; stop.disabled = false;
@@ -76,7 +101,8 @@ start.onclick = async () => {
       const msg = JSON.parse(ev.data);
       if (msg.type === 'partial') partial.textContent = msg.text;
       if (msg.type === 'final') {
-        records.set(msg.seq, {raw: msg.text, punct: ''});
+        records.set(msg.seq, {raw: msg.raw ?? msg.text, text: msg.text,
+                              pieces: msg.pieces, punct: ''});
         partial.textContent = ''; render();
       }
       if (msg.type === 'punctuation') {

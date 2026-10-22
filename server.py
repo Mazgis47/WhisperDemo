@@ -8,6 +8,7 @@ import numpy as np
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from faster_whisper import WhisperModel
 from faster_whisper.vad import VadOptions, get_speech_timestamps
+from lt_spell import Corrector
 from punctuation import Punctuator
 
 app = FastAPI()
@@ -30,6 +31,9 @@ vad_options = VadOptions(threshold=0.5, min_speech_duration_ms=200,
 # The punctuation model runs on CPU, not in RTX 2070 VRAM.
 log.info('Loading punctuation model on CPU...')
 punctuator = Punctuator()
+# LT-Checker dictionary (dict.bin + lt_freq.bin), CPU/RAM only.
+log.info('Loading LT-Checker dictionary...')
+corrector = Corrector()
 inference_lock = asyncio.Lock()
 
 
@@ -53,6 +57,7 @@ async def ws_transcribe(ws: WebSocket):
     last_check = last_partial = 0.0
     seq = 0
     punctuation_enabled = False
+    spelling_enabled = True
     punctuation_jobs = set()
 
     async def punctuate_and_send(sequence, text):
@@ -91,8 +96,15 @@ async def ws_transcribe(ws: WebSocket):
         if text:
             if is_final:
                 seq += 1
+                raw, pieces = text, None
+                if spelling_enabled:
+                    try:
+                        text, pieces = await asyncio.to_thread(corrector.correct, raw)
+                    except Exception:
+                        log.exception('Spelling correction error')
                 await ws.send_text(json.dumps({
-                    'type': 'final', 'seq': seq, 'text': text
+                    'type': 'final', 'seq': seq, 'text': text, 'raw': raw,
+                    'pieces': pieces
                 }, ensure_ascii=False))
                 if punctuation_enabled:
                     job = asyncio.create_task(punctuate_and_send(seq, text))
@@ -118,6 +130,9 @@ async def ws_transcribe(ws: WebSocket):
                 continue
             if message.get('text') == 'punctuation_off':
                 punctuation_enabled = False
+                continue
+            if message.get('text') in ('spelling_on', 'spelling_off'):
+                spelling_enabled = message['text'] == 'spelling_on'
                 continue
             if message.get('text') == 'stop':
                 await process(force=True)
