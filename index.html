@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="lt">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Whisper – gyva transkripcija</title>
+<style>
+body{font:17px system-ui;max-width:900px;margin:35px auto;padding:16px;line-height:1.5}
+button{padding:10px 18px;margin-right:8px;cursor:pointer}
+pre{font:inherit;white-space:pre-wrap;overflow-wrap:anywhere}
+#partial{color:#777;font-style:italic}#status{font-size:14px;color:#555}
+.columns{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+@media(max-width:700px){.columns{grid-template-columns:1fr}}
+</style></head><body>
+<h2>Gyva transkripcija – Ąžuolas</h2>
+<p><button id="start">Pradėti</button><button id="stop" disabled>Sustabdyti</button></p>
+<p><label><input type="checkbox" id="punct"> Įjungti skyrybos atkūrimą (be žodžių taisymo)</label></p>
+<p id="status">Neprisijungta</p>
+<div class="columns">
+<section><h3>Originali transkripcija</h3><pre id="raw"></pre><div id="partial"></div></section>
+<section id="formattedColumn" hidden><h3>Su skyrybos ženklais</h3><pre id="formatted"></pre></section>
+</div>
+<script>
+const URL = 'ws://192.168.68.110:8001/ws/transcribe';
+const start = document.getElementById('start');
+const stop = document.getElementById('stop');
+const status = document.getElementById('status');
+const raw = document.getElementById('raw');
+const partial = document.getElementById('partial');
+const formatted = document.getElementById('formatted');
+const punct = document.getElementById('punct');
+const formattedColumn = document.getElementById('formattedColumn');
+let ws, stream, ctx, source, node, silent, stopping = false;
+const records = new Map();
+
+function render() {
+  raw.textContent = [...records.values()].map(r => r.raw).join(' ');
+  formatted.textContent = [...records.values()].map(r => r.punct || r.raw).join(' ');
+}
+function setPunctuation(enabled) {
+  formattedColumn.hidden = !enabled;
+  if (ws?.readyState === WebSocket.OPEN)
+    ws.send(enabled ? 'punctuation_on' : 'punctuation_off');
+}
+punct.onchange = () => setPunctuation(punct.checked);
+async function cleanup() {
+  try { source?.disconnect(); node?.disconnect(); silent?.disconnect(); } catch {}
+  stream?.getTracks().forEach(t => t.stop());
+  if (ctx && ctx.state !== 'closed') await ctx.close();
+  start.disabled = false; stop.disabled = true;
+}
+start.onclick = async () => {
+  try {
+    stopping = false;
+    records.clear(); raw.textContent = ''; formatted.textContent = '';
+    partial.textContent = '';
+    stream = await navigator.mediaDevices.getUserMedia({audio: {
+      echoCancellation: false, noiseSuppression: false, autoGainControl: false
+    }});
+    ctx = new AudioContext();
+    await ctx.audioWorklet.addModule('pcm-worklet.js');
+    source = ctx.createMediaStreamSource(stream);
+    node = new AudioWorkletNode(ctx, 'pcm16k');
+    silent = ctx.createGain(); silent.gain.value = 0;
+    source.connect(node).connect(silent).connect(ctx.destination);
+    ws = new WebSocket(URL);
+    ws.binaryType = 'arraybuffer';
+    node.port.onmessage = ev => {
+      if (ws.readyState === WebSocket.OPEN && !stopping) ws.send(ev.data);
+    };
+    ws.onopen = () => {
+      setPunctuation(punct.checked);
+      status.textContent = 'Klausomasi…';
+      start.disabled = true; stop.disabled = false;
+    };
+    ws.onmessage = ev => {
+      const msg = JSON.parse(ev.data);
+      if (msg.type === 'partial') partial.textContent = msg.text;
+      if (msg.type === 'final') {
+        records.set(msg.seq, {raw: msg.text, punct: ''});
+        partial.textContent = ''; render();
+      }
+      if (msg.type === 'punctuation') {
+        const r = records.get(msg.seq);
+        if (r) {r.punct = msg.text;render();}
+      }
+      if (msg.type === 'punctuation_error') status.textContent = 'Skyrybos klaida – originalas išsaugotas';
+      if (msg.type === 'error') status.textContent = msg.message;
+      if (msg.type === 'stopped') {
+        ws.close(); status.textContent = 'Sustabdyta'; cleanup();
+      }
+    };
+    ws.onerror = () => {status.textContent = 'Ryšio klaida';};
+    ws.onclose = () => { if (!stopping) {status.textContent = 'Ryšys nutrūko'; cleanup();} };
+  } catch (e) { status.textContent = e.message; await cleanup(); }
+};
+stop.onclick = async () => {
+  if (stopping) return;
+  stopping = true;
+  node.port.onmessage = ev => {if (ws.readyState === WebSocket.OPEN) ws.send(ev.data);};
+  node.port.postMessage('flush');
+  source.disconnect();
+  await new Promise(r => setTimeout(r, 150));
+  if (ws.readyState === WebSocket.OPEN) ws.send('stop');
+  setTimeout(() => {
+    if (ws?.readyState === WebSocket.OPEN) {ws.close();cleanup();}
+  }, 30000);
+};
+</script></body></html>
