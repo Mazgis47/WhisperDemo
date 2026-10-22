@@ -12,7 +12,7 @@ mark{background:#fff1a8;border-radius:3px;cursor:help}
 .columns{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:24px}
 </style></head><body>
 <h2>Gyva transkripcija – Ąžuolas</h2>
-<p><button id="start">Pradėti</button><button id="stop" disabled>Sustabdyti</button></p>
+<p><button id="start">Pradėti</button><button id="stop" disabled>Sustabdyti</button><button id="clear">Išvalyti</button></p>
 <p><label><input type="checkbox" id="spell" checked> Taisyti žodyne nerastus žodžius (LT-Checker)</label></p>
 <p><label><input type="checkbox" id="punct"> Įjungti skyrybos atkūrimą (be žodžių taisymo)</label></p>
 <p id="status">Neprisijungta</p>
@@ -54,12 +54,26 @@ function render() {
   list.forEach((r, i) => { if (i) fixed.append(' '); fixed.append(renderFixed(r)); });
   formatted.textContent = list.map(r => r.punct || r.text).join(' ');
 }
+// Autoscroll: follow the newest text only while the user is at the bottom.
+function nearBottom() {
+  const el = document.scrollingElement;
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+}
+function scrollToEnd() {
+  const el = document.scrollingElement;
+  el.scrollTop = el.scrollHeight;
+}
 function setSpelling(enabled) {
   fixedColumn.hidden = !enabled;
   if (ws?.readyState === WebSocket.OPEN)
     ws.send(enabled ? 'spelling_on' : 'spelling_off');
 }
 spell.onchange = () => setSpelling(spell.checked);
+// Clears shown text; recording continues. Late punctuation for cleared
+// segments is ignored because their records are gone.
+document.getElementById('clear').onclick = () => {
+  records.clear(); partial.textContent = ''; render();
+};
 function setPunctuation(enabled) {
   formattedColumn.hidden = !enabled;
   if (ws?.readyState === WebSocket.OPEN)
@@ -99,6 +113,8 @@ start.onclick = async () => {
     };
     ws.onmessage = ev => {
       const msg = JSON.parse(ev.data);
+      const follow = nearBottom();
+      queueMicrotask(() => { if (follow) scrollToEnd(); });
       if (msg.type === 'partial') partial.textContent = msg.text;
       if (msg.type === 'final') {
         records.set(msg.seq, {raw: msg.raw ?? msg.text, text: msg.text,
