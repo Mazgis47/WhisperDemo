@@ -19,7 +19,9 @@ Lietuviška kalbos transkripcija iš mikrofono (gyvai) arba iš garso failo (off
 | `index.html`, `pcm-worklet.js` | Web klientas (mikrofonas → serveris) |
 | `LT-Checker/` | LT-Checker repozitorija; naudojami tik `data/dict.bin` ir `data/lt_freq.bin` (į git neįtraukta) |
 
-## Ubuntu serveris (mp-dl, 192.168.68.110)
+## Ubuntu serveris (NVIDIA GPU)
+
+Pavyzdžiuose: virtuali aplinka `~/whisper-env`, projekto katalogas `~/whisper/v2` – pasikeiskite į savo.
 
 ### Paruošimas
 
@@ -30,7 +32,7 @@ cd ~/whisper/v2
 git clone <LT-Checker repo> LT-Checker   # reikia LT-Checker/data/dict.bin ir lt_freq.bin
 ```
 
-Whisper modelis: `/home/mp/whisper-models/azuolas-ct2` (`MODEL_NAME` faile `server.py`, `--model` – `transcribe.py`).
+Whisper modelis – Ąžuolas CTranslate2 formatu. Kelias nustatomas `MODEL_NAME` faile `server.py` (jį naudoja ir `transcribe.py`, galima pakeisti `--model`).
 Skyrybos modelis atsisiunčiamas per pirmą paleidimą (~140M parametrų).
 
 ### Gyvas serveris
@@ -49,7 +51,7 @@ Pakeitus `server.py` arba `lt_spell.py`, serverį reikia perkrauti (Ctrl+C ir pa
 ```bash
 source ~/whisper-env/bin/activate
 cd ~/whisper/v2
-python transcribe.py ../audio.mp3 rezultatas.txt --spell --punct
+python transcribe.py irasas.mp3 rezultatas.txt --spell --punct
 ```
 
 | Parametras | Reikšmė |
@@ -67,14 +69,13 @@ Jei tuo metu veikia ir gyvas serveris, GPU bus du Whisper modeliai – gali prit
 
 ## Windows klientas
 
-Nukopijuokite `index.html` ir `pcm-worklet.js` į `C:\Mazho\AI\Audio\whisper_live_lt_v2` ir paleiskite:
+Nukopijuokite `index.html` ir `pcm-worklet.js` į bet kurį katalogą (pvz. `whisper_live_lt_v2`) ir jame paleiskite:
 
 ```powershell
-cd C:\Mazho\AI\Audio\whisper_live_lt_v2
 python -m http.server 5500 --bind 127.0.0.1
 ```
 
-Atidarykite http://localhost:5500/index.html (ne `file://`). Serverio adresas: `ws://192.168.68.110:8001/ws/transcribe` (`URL` faile `index.html`).
+Atidarykite http://localhost:5500/index.html (ne `file://`). Serverio adresą nustatykite `URL` faile `index.html`, pvz. `ws://<serverio-IP>:8001/ws/transcribe`.
 Atnaujinus `index.html`, puslapį perkraukite su Ctrl+F5.
 
 | Valdiklis | Veikimas |
