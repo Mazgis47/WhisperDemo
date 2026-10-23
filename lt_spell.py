@@ -495,7 +495,11 @@ class Corrector:
 
     def _valid_part(self, part):
         # Stricter than C# (which only suggests): automatic split parts must be
-        # dictionary words (not lt_freq-only) of 3+ letters or a common short word.
+        # dictionary words of 3+ letters (or a common short word) AND be loaded
+        # from lt_freq.bin (frequency >= MIN_SUGGESTION_FREQUENCY): rare forms
+        # like "ažo" made "uždarbiažo" -> "uždarbi ažo".
+        if part not in self.index:
+            return False
         if len(part) < 3:
             return part.lower() in _SHORT_SPLIT_WORDS
         return self._morph_known(part, allow_synthetic=False)

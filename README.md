@@ -124,7 +124,7 @@ Perkelta iš LT-Checker C#: `DictionaryBinaryReader` + `WordAnalyzer` (morfologi
 * `lt_freq.bin` žodžiai su dažniu < 5 nekraunami (`MIN_SUGGESTION_FREQUENCY`) – greitesnis startas, mažiau RAM, mažiau šiukšlių;
 * pakeitimas niekada nebūna VISOMIS DIDŽIOSIOMIS;
 * žodis be morfologijos patvirtinimo siūlomas tik kaip raidžių dydžio pataisa (`rusija` → `Rusija`);
-* skaidant sulipusį žodį abi dalys turi būti žinomos morfologijai ir ≥ 3 raidžių (išskyrus aš, ir, be, su, …);
+* skaidant sulipusį žodį abi dalys turi būti žinomos morfologijai, ≥ 3 raidžių (išskyrus aš, ir, be, su, …) ir įkeltos iš `lt_freq.bin` (dažnis ≥ 5) – retos formos neskaido (`uždarbiažo` ≠ `uždarbi ažo`);
 * tik raidžių dydžiu ar diakritikais besiskiriantis variantas turi pirmenybę prieš skaidymą;
 * išimta C# taisyklė, priimdavusi mažąja raide parašytą tikrinį daiktavardį su daugiskaitos analize (`lietuvos` dabar → `Lietuvos`).
 
