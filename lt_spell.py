@@ -19,7 +19,7 @@ log = logging.getLogger('lt-spell')
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'LT-Checker', 'data')
 NO_PREFIX = 105
 # First iteration: corpus word frequency is not used for ranking suggestions.
-USE_FREQUENCY = False
+USE_FREQUENCY = True
 # lt_freq.bin words seen fewer times are mostly noise ("žųsis 1") and are not loaded.
 MIN_SUGGESTION_FREQUENCY = 5
 
