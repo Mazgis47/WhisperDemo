@@ -539,6 +539,12 @@ class Corrector:
             return fixed
         if self.is_known(word):
             return None
+        # Dictionary form differing only in case ("makronas" -> "Makronas"). Taken
+        # from dict.bin directly, so new dictionary words work without lt_freq.bin.
+        low = word.lower()
+        case_fix = sorted({s for s, rid, _ in self._analyses(low) if rid >= 0 and s.lower() == low})
+        if case_fix:
+            return case_fix[0]
         regular = self.index.suggest(word, 5)
         # A case/diacritic-free identical form ("londoną" -> "Londoną") beats a split.
         if regular and regular[0][1] == 0:
