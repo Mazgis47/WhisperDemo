@@ -15,6 +15,7 @@ Lietuviška kalbos transkripcija iš mikrofono (gyvai) arba iš garso failo (off
 | `server.py` | Gyvos transkripcijos WebSocket serveris (`/ws/transcribe`) |
 | `transcribe.py` | Offline garso failo transkripcija į tekstinį failą |
 | `lt_spell.py` | Žodžių tikrinimas ir taisymas (LT-Checker C# logika, perkelta į Python) |
+| `colloquial.txt` | Šnekamosios kalbos žodžiai su fiksuotu pakeitimu (`nu na`) |
 | `punctuation.py` | Skyrybos atkūrimas (`Horizon-Labs/punctuation-restoration-small`) |
 | `index.html`, `pcm-worklet.js` | Web klientas (mikrofonas → serveris) |
 | `LT-Checker/` | LT-Checker repozitorija; naudojami tik `data/dict.bin` ir `data/lt_freq.bin` (į git neįtraukta) |
@@ -119,13 +120,15 @@ Perkelta iš LT-Checker C#: `DictionaryBinaryReader` + `WordAnalyzer` (morfologi
 * žodžiai su didžiąja raide viduryje (`McDonald`), URL / el. pašto dalys.
 
 **Skirtumai nuo C#** (ten pasiūlymus renkasi žmogus, čia – automatiškai):
-* žodžių dažnis rangavimui nenaudojamas (`USE_FREQUENCY = False`);
+* žodžių dažnis rangavimui naudojamas kaip C# (`USE_FREQUENCY = True`; `False` – be dažnio);
 * `lt_freq.bin` žodžiai su dažniu < 5 nekraunami (`MIN_SUGGESTION_FREQUENCY`) – greitesnis startas, mažiau RAM, mažiau šiukšlių;
 * pakeitimas niekada nebūna VISOMIS DIDŽIOSIOMIS;
 * žodis be morfologijos patvirtinimo siūlomas tik kaip raidžių dydžio pataisa (`rusija` → `Rusija`);
 * skaidant sulipusį žodį abi dalys turi būti žinomos morfologijai ir ≥ 3 raidžių (išskyrus aš, ir, be, su, …);
 * tik raidžių dydžiu ar diakritikais besiskiriantis variantas turi pirmenybę prieš skaidymą;
 * išimta C# taisyklė, priimdavusi mažąja raide parašytą tikrinį daiktavardį su daugiskaitos analize (`lietuvos` dabar → `Lietuvos`).
+
+**Šnekamosios kalbos žodžiai** – `colloquial.txt` (`žodis pakeitimas` eilutėje, pvz. `nu na`). Tikrinama prieš žodyną ir pasiūlymus, didžioji pirma raidė išlaikoma (`Nu` → `Na`). Skirta žodžiams, kurių pagal raides ir dažnį neišspręsi (`nu` pagal dažnį visada taptų `su`). Pakeitus failą, serverį reikia perkrauti.
 
 Patikrinti atskirus žodžius ar tekstą:
 
@@ -137,6 +140,6 @@ python lt_spell.py "šiandien lietuva yra viena iš pirmųjų europos sąjungos 
 
 * **Žodyno spragos** – žodis, kurio nėra `dict.bin` (pvz. `retkarčiais`, `Velykos`), pakeičiamas artimiausiu žinomu (`renkančiais`, `vėlyvos`). Taisyti reikia LT-Checker žodyne.
 * **Vardai be morfologijos** (`Larsas`, `Makronas`) turi mažą dažnį `lt_freq.bin` ir nebekraunami – keičiami į panašų žodį (`barsas`, `mikronas`).
-* **Lygiaverčiai pasiūlymai** – be dažnio ir konteksto pasirinkimas tarp vienodo balo kandidatų atsitiktinis (`aistrui` → `bistrui`).
+* **Be konteksto** – pasiūlymas renkamas tik pagal raides ir dažnį, todėl dažnesnis žodis gali laimėti prieš tinkamą sakiniui.
 * **Skyryba** – taikoma kiekvienam segmentui atskirai (60 žodžių langais), gali klysti ties ribomis; tikrinių vardų didžiųjų raidžių neatkuria (tai daro žodžių taisymas).
 * `MAX_UTTERANCE` segmentai baigiami priverstinai, be suderinimo per ribą.

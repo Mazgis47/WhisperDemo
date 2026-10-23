@@ -17,8 +17,10 @@ import numpy as np
 log = logging.getLogger('lt-spell')
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'LT-Checker', 'data')
+# Colloquial words with a fixed replacement ("nu na"); checked before any other rule.
+COLLOQUIAL_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'colloquial.txt')
 NO_PREFIX = 105
-# First iteration: corpus word frequency is not used for ranking suggestions.
+# Rank suggestions by lt_freq.bin corpus frequency (as in C# SuggestionIndex).
 USE_FREQUENCY = True
 # lt_freq.bin words seen fewer times are mostly noise ("žųsis 1") and are not loaded.
 MIN_SUGGESTION_FREQUENCY = 5
@@ -441,14 +443,29 @@ def _is_all_caps(word):
 
 # ---------------------------------------------------------------- corrector
 
+def load_colloquial(path=COLLOQUIAL_FILE):
+    """'žodis pakeitimas' per line, '#' comments; a missing file means no entries."""
+    table = {}
+    if not os.path.exists(path):
+        return table
+    with open(path, encoding='utf-8') as f:
+        for line in f:
+            parts = line.split('#', 1)[0].split(None, 1)
+            if len(parts) == 2:
+                table[parts[0].lower()] = parts[1].strip()
+    return table
+
+
 class Corrector:
-    def __init__(self, data_dir=DATA_DIR):
+    def __init__(self, data_dir=DATA_DIR, colloquial_file=COLLOQUIAL_FILE):
         t0 = time.monotonic()
         self.morph = Morphology(os.path.join(data_dir, 'dict.bin'))
         t1 = time.monotonic()
         self.index = SuggestionIndex(os.path.join(data_dir, 'lt_freq.bin'))
-        log.info('LT spell data loaded: dict.bin %.1fs, lt_freq.bin %.1fs (%d words)',
-                 t1 - t0, time.monotonic() - t1, len(self.index.words))
+        self.colloquial = load_colloquial(colloquial_file)
+        log.info('LT spell data loaded: dict.bin %.1fs, lt_freq.bin %.1fs (%d words), '
+                 'colloquial %d', t1 - t0, time.monotonic() - t1, len(self.index.words),
+                 len(self.colloquial))
 
     @lru_cache(maxsize=200000)
     def _analyses(self, word):
@@ -513,6 +530,9 @@ class Corrector:
     @lru_cache(maxsize=50000)
     def best_replacement(self, word):
         """First suggestion for an unknown word, or None (word is kept)."""
+        fixed = self.colloquial.get(word.lower())
+        if fixed:
+            return fixed
         if self.is_known(word):
             return None
         regular = self.index.suggest(word, 5)

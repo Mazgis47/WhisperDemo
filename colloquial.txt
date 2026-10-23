@@ -1,0 +1,4 @@
+# Šnekamosios kalbos žodžiai su fiksuotu pakeitimu (lt_spell.py).
+# Formatas: žodis pakeitimas   (mažosiomis; didžioji pirma raidė išlaikoma automatiškai)
+# Tikrinama prieš žodyną ir pasiūlymus. Pakeitus failą, serverį reikia perkrauti.
+nu na
