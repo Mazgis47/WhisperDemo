@@ -18,7 +18,7 @@ mark{background:#fff1a8;border-radius:3px;cursor:help}
 .columns{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:24px}
 </style></head><body>
 <header>
-<h2>Gyva transkripcija – Ąžuolas</h2>
+<h2>Gyva transkripcija<span id="modelName"></span></h2>
 <div class="buttons"><button id="start">Pradėti</button><button id="stop" disabled>Sustabdyti</button><button id="clear">Išvalyti</button></div>
 <label><input type="checkbox" id="punct"> Skyrybos atkūrimas</label>
 <label><input type="checkbox" id="spell" checked> Žodžių taisymas (LT-Checker)</label>
@@ -143,6 +143,7 @@ start.onclick = async () => {
       const msg = JSON.parse(ev.data);
       const follow = nearBottom();
       queueMicrotask(() => { if (follow) scrollToEnd(); });
+      if (msg.type === 'info') document.getElementById('modelName').textContent = ' – ' + msg.model;
       if (msg.type === 'partial') partial.textContent = msg.text;
       if (msg.type === 'final') {
         records.set(key(msg.seq), {raw: msg.text, punct: '', fixed: null, pieces: null});

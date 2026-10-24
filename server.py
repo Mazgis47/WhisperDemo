@@ -6,8 +6,9 @@ from contextlib import suppress
 
 import numpy as np
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from faster_whisper import WhisperModel
 from faster_whisper.vad import VadOptions, get_speech_timestamps
+
+import asr
 from lt_spell import Corrector
 from punctuation import Punctuator
 
@@ -15,16 +16,15 @@ app = FastAPI()
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger('whisper-live')
 
-SAMPLE_RATE = 16000
-LANGUAGE = 'lt'
-MODEL_NAME = '/home/mp/whisper-models/azuolas-ct2'
+SAMPLE_RATE = asr.SAMPLE_RATE
 CHECK_EVERY = 0.2
 PARTIAL_EVERY = 2.0
 FINAL_SILENCE = 0.5
 MAX_UTTERANCE = 30.0
 MIN_AUDIO = 0.8
 
-model = WhisperModel(MODEL_NAME, device='cuda', compute_type='float16')
+# ASR model from the ASR_MODEL env var: azuolas (default), large-v3, turbo, canary.
+model = asr.load()
 vad_options = VadOptions(threshold=0.5, min_speech_duration_ms=200,
                          min_silence_duration_ms=500, speech_pad_ms=150)
 
@@ -41,18 +41,10 @@ def speech_ranges(samples):
     return get_speech_timestamps(samples, vad_options)
 
 
-def run_whisper(samples, is_final):
-    segments, _ = model.transcribe(
-        samples.astype(np.float32, copy=False), language=LANGUAGE,
-        beam_size=5 if is_final else 1, vad_filter=False,
-        condition_on_previous_text=False, temperature=0.0,
-    )
-    return ' '.join(s.text.strip() for s in segments).strip()
-
-
 @app.websocket('/ws/transcribe')
 async def ws_transcribe(ws: WebSocket):
     await ws.accept()
+    await ws.send_text(json.dumps({'type': 'info', 'model': model.label}, ensure_ascii=False))
     blocks, block_len = [], 0
     last_check = last_partial = 0.0
     seq = 0
@@ -66,7 +58,9 @@ async def ws_transcribe(ws: WebSocket):
         text = raw
         if do_punct:
             try:
-                text = await asyncio.to_thread(punctuator, raw)
+                # Canary punctuates by itself; punctuation.py would only double it.
+                if not model.native_punctuation:
+                    text = await asyncio.to_thread(punctuator, raw)
                 await ws.send_text(json.dumps({
                     'type': 'punctuation', 'seq': sequence, 'text': text
                 }, ensure_ascii=False))
@@ -104,7 +98,7 @@ async def ws_transcribe(ws: WebSocket):
         end = min(len(samples), ranges[-1]['end'] + int(0.2 * SAMPLE_RATE))
         audio = samples[start:end]
         async with inference_lock:
-            text = await asyncio.to_thread(run_whisper, audio, is_final)
+            text = await asyncio.to_thread(model.transcribe, audio, is_final)
         if text:
             if is_final:
                 seq += 1
