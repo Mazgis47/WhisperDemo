@@ -3,8 +3,8 @@
 Lietuviška kalbos transkripcija iš mikrofono (gyvai) arba iš garso failo (offline):
 
 1. **Whisper (Ąžuolas)** – atpažįsta žodžius (GPU).
-2. **Žodžių taisymas (LT-Checker)** – žodyne nerastą žodį pakeičia pirmu pasiūlymu (CPU).
-3. **Skyrybos atkūrimas** – prideda `. , ? : -` ir sakinio pradžios didžiąją raidę, žodžių nekeičia (CPU).
+2. **Skyrybos atkūrimas** – prideda `. , ? : -` ir sakinio pradžios didžiąją raidę, žodžių nekeičia (CPU).
+3. **Žodžių taisymas (LT-Checker)** – žodyne nerastą žodį pakeičia pirmu pasiūlymu (CPU). Taikomas tekstui su skyryba, o jei skyryba išjungta – originaliam.
 
 2 ir 3 žingsniai neprivalomi, įjungiami atskirai.
 
@@ -87,8 +87,8 @@ Atnaujinus `index.html`, puslapį perkraukite su Ctrl+F5.
 | **Įjungti skyrybos atkūrimą** | Rodo stulpelį „Su skyrybos ženklais“ |
 
 * **Originali transkripcija** – visada tiksliai tai, ką atpažino Whisper.
-* **Pataisyti žodžiai** – pakeisti žodžiai pažymėti geltonai; užvedus pelę rodoma „Buvo: …“.
-* **Su skyrybos ženklais** – skyryba taikoma jau pataisytam tekstui.
+* **Su skyrybos ženklais** – originalas su skyryba (žodžiai nekeisti).
+* **Pataisyti žodžiai** – galutinis tekstas: taisoma tekste su skyryba, o jei skyryba išjungta – originale. Pakeisti žodžiai pažymėti geltonai; užvedus pelę rodoma „Buvo: …“.
 * Varnelės veikia tik **naujiems** segmentams, ankstesni neperskaičiuojami.
 * Puslapis automatiškai slenka prie naujausio teksto, kol esate apačioje; pakilus aukščiau – nejuda.
 

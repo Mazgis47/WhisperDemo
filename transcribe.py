@@ -54,17 +54,18 @@ def main():
             text = seg.text.strip()
             if not text:
                 continue
+            # Punctuation first (it never changes ASR words), then spelling on its result.
+            if punctuator:
+                try:
+                    text = punctuator(text)
+                except Exception:
+                    log.exception('Skyrybos klaida, segmentas paliekamas be skyrybos')
             if corrector:
                 text, pieces = corrector.correct(text)
                 for fixed, original in pieces:
                     if original is not None:
                         changes += 1
                         log.info('  %s -> %s', original, fixed)
-            if punctuator:
-                try:
-                    text = punctuator(text)
-                except Exception:
-                    log.exception('Skyrybos klaida, segmentas paliekamas be skyrybos')
             line = text if args.no_timestamps else '[%.2f - %.2f] %s' % (seg.start, seg.end, text)
             out.write(line + '\n')
             out.flush()

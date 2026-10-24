@@ -18,8 +18,8 @@ mark{background:#fff1a8;border-radius:3px;cursor:help}
 <p id="status">Neprisijungta</p>
 <div class="columns">
 <section><h3>Originali transkripcija</h3><pre id="raw"></pre><div id="partial"></div></section>
-<section id="fixedColumn"><h3>Pataisyti žodžiai</h3><pre id="fixed"></pre></section>
 <section id="formattedColumn" hidden><h3>Su skyrybos ženklais</h3><pre id="formatted"></pre></section>
+<section id="fixedColumn"><h3>Pataisyti žodžiai</h3><pre id="fixed"></pre></section>
 </div>
 <script>
 const URL = 'ws://192.168.68.110:8001/ws/transcribe';
@@ -37,22 +37,27 @@ const fixedColumn = document.getElementById('fixedColumn');
 let ws, stream, ctx, source, node, silent, stopping = false;
 const records = new Map();
 
-function renderFixed(r) {
+function renderPieces(text, pieces) {
   const frag = document.createDocumentFragment();
-  for (const [text, original] of r.pieces || [[r.text, null]]) {
-    if (original === null) { frag.append(text); continue; }
+  for (const [part, original] of pieces || [[text, null]]) {
+    if (original === null) { frag.append(part); continue; }
     const m = document.createElement('mark');
-    m.textContent = text; m.title = 'Buvo: ' + original;
+    m.textContent = part; m.title = 'Buvo: ' + original;
     frag.append(m);
   }
   return frag;
 }
+function renderInto(el, list, pick) {
+  el.replaceChildren();
+  list.forEach((r, i) => { if (i) el.append(' '); el.append(pick(r)); });
+}
+// Server order: raw -> punctuation (if on) -> spelling on the punctuated text
+// (or on raw when punctuation is off). Columns show each stage as it arrives.
 function render() {
   const list = [...records.values()];
   raw.textContent = list.map(r => r.raw).join(' ');
-  fixed.replaceChildren();
-  list.forEach((r, i) => { if (i) fixed.append(' '); fixed.append(renderFixed(r)); });
-  formatted.textContent = list.map(r => r.punct || r.text).join(' ');
+  formatted.textContent = list.map(r => r.punct || r.raw).join(' ');
+  renderInto(fixed, list, r => renderPieces(r.fixed ?? (r.punct || r.raw), r.pieces));
 }
 // Autoscroll: follow the newest text only while the user is at the bottom.
 function nearBottom() {
@@ -117,13 +122,16 @@ start.onclick = async () => {
       queueMicrotask(() => { if (follow) scrollToEnd(); });
       if (msg.type === 'partial') partial.textContent = msg.text;
       if (msg.type === 'final') {
-        records.set(msg.seq, {raw: msg.raw ?? msg.text, text: msg.text,
-                              pieces: msg.pieces, punct: ''});
+        records.set(msg.seq, {raw: msg.text, punct: '', fixed: null, pieces: null});
         partial.textContent = ''; render();
       }
       if (msg.type === 'punctuation') {
         const r = records.get(msg.seq);
-        if (r) {r.punct = msg.text;render();}
+        if (r) {r.punct = msg.text; render();}
+      }
+      if (msg.type === 'spelling') {
+        const r = records.get(msg.seq);
+        if (r) {r.fixed = msg.text; r.pieces = msg.pieces; render();}
       }
       if (msg.type === 'punctuation_error') status.textContent = 'Skyrybos klaida – originalas išsaugotas';
       if (msg.type === 'error') status.textContent = msg.message;
