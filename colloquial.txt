@@ -2,3 +2,5 @@
 # Formatas: žodis pakeitimas   (mažosiomis; didžioji pirma raidė išlaikoma automatiškai)
 # Tikrinama prieš žodyną ir pasiūlymus. Pakeitus failą, serverį reikia perkrauti.
 nu na
+biškį truputį
+biški truputį

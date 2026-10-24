@@ -20,7 +20,7 @@ LANGUAGE = 'lt'
 MODEL_NAME = '/home/mp/whisper-models/azuolas-ct2'
 CHECK_EVERY = 0.2
 PARTIAL_EVERY = 2.0
-FINAL_SILENCE = 0.7
+FINAL_SILENCE = 0.5
 MAX_UTTERANCE = 30.0
 MIN_AUDIO = 0.8
 
