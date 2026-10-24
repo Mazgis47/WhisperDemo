@@ -4,18 +4,26 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Whisper – gyva transkripcija</title>
 <style>
-body{font:17px system-ui;max-width:1300px;margin:35px auto;padding:16px;line-height:1.5}
-button{padding:10px 18px;margin-right:8px;cursor:pointer}
+body{font:17px system-ui;max-width:1300px;margin:0 auto;padding:0 16px 16px;line-height:1.5;background:#fff}
+button{padding:6px 14px;cursor:pointer}
+header{position:sticky;top:0;z-index:1;background:#fff;display:flex;flex-wrap:wrap;
+  align-items:center;gap:6px 18px;padding:10px 0;border-bottom:1px solid #ddd}
+header h2{margin:0;font-size:20px}
+header .buttons{display:flex;gap:8px}
+header label{white-space:nowrap}
+#status{margin-left:auto}
 pre{font:inherit;white-space:pre-wrap;overflow-wrap:anywhere}
 #partial{color:#777;font-style:italic}#status{font-size:14px;color:#555}
 mark{background:#fff1a8;border-radius:3px;cursor:help}
 .columns{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:24px}
 </style></head><body>
+<header>
 <h2>Gyva transkripcija – Ąžuolas</h2>
-<p><button id="start">Pradėti</button><button id="stop" disabled>Sustabdyti</button><button id="clear">Išvalyti</button></p>
-<p><label><input type="checkbox" id="spell" checked> Taisyti žodyne nerastus žodžius (LT-Checker)</label></p>
-<p><label><input type="checkbox" id="punct"> Įjungti skyrybos atkūrimą (be žodžių taisymo)</label></p>
-<p id="status">Neprisijungta</p>
+<div class="buttons"><button id="start">Pradėti</button><button id="stop" disabled>Sustabdyti</button><button id="clear">Išvalyti</button></div>
+<label><input type="checkbox" id="punct"> Skyrybos atkūrimas</label>
+<label><input type="checkbox" id="spell" checked> Žodžių taisymas (LT-Checker)</label>
+<span id="status">Neprisijungta</span>
+</header>
 <div class="columns">
 <section><h3>Originali transkripcija</h3><pre id="raw"></pre><div id="partial"></div></section>
 <section id="formattedColumn" hidden><h3>Su skyrybos ženklais</h3><pre id="formatted"></pre></section>
@@ -85,6 +93,14 @@ function setPunctuation(enabled) {
     ws.send(enabled ? 'punctuation_on' : 'punctuation_off');
 }
 punct.onchange = () => setPunctuation(punct.checked);
+// The browser restores checkbox state on reload (after this script may run),
+// so column visibility is synced again on pageshow.
+function syncColumns() {
+  formattedColumn.hidden = !punct.checked;
+  fixedColumn.hidden = !spell.checked;
+}
+syncColumns();
+addEventListener('pageshow', syncColumns);
 async function cleanup() {
   try { source?.disconnect(); node?.disconnect(); silent?.disconnect(); } catch {}
   stream?.getTracks().forEach(t => t.stop());
