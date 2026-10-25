@@ -4,22 +4,30 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Whisper – gyva transkripcija</title>
 <style>
-body{font:17px system-ui;max-width:1300px;margin:35px auto;padding:16px;line-height:1.5}
-button{padding:10px 18px;margin-right:8px;cursor:pointer}
+body{font:17px system-ui;max-width:1300px;margin:0 auto;padding:0 16px 16px;line-height:1.5;background:#fff}
+button{padding:6px 14px;cursor:pointer}
+header{position:sticky;top:0;z-index:1;background:#fff;display:flex;flex-wrap:wrap;
+  align-items:center;gap:6px 18px;padding:10px 0;border-bottom:1px solid #ddd}
+header h2{margin:0;font-size:20px}
+header .buttons{display:flex;gap:8px}
+header label{white-space:nowrap}
+#status{margin-left:auto}
 pre{font:inherit;white-space:pre-wrap;overflow-wrap:anywhere}
 #partial{color:#777;font-style:italic}#status{font-size:14px;color:#555}
 mark{background:#fff1a8;border-radius:3px;cursor:help}
 .columns{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:24px}
 </style></head><body>
-<h2>Gyva transkripcija – Ąžuolas</h2>
-<p><button id="start">Pradėti</button><button id="stop" disabled>Sustabdyti</button><button id="clear">Išvalyti</button></p>
-<p><label><input type="checkbox" id="spell" checked> Taisyti žodyne nerastus žodžius (LT-Checker)</label></p>
-<p><label><input type="checkbox" id="punct"> Įjungti skyrybos atkūrimą (be žodžių taisymo)</label></p>
-<p id="status">Neprisijungta</p>
+<header>
+<h2>Gyva transkripcija<span id="modelName"></span></h2>
+<div class="buttons"><button id="start">Pradėti</button><button id="stop" disabled>Sustabdyti</button><button id="clear">Išvalyti</button></div>
+<label><input type="checkbox" id="punct"> Skyrybos atkūrimas</label>
+<label><input type="checkbox" id="spell" checked> Žodžių taisymas (LT-Checker)</label>
+<span id="status">Neprisijungta</span>
+</header>
 <div class="columns">
 <section><h3>Originali transkripcija</h3><pre id="raw"></pre><div id="partial"></div></section>
-<section id="fixedColumn"><h3>Pataisyti žodžiai</h3><pre id="fixed"></pre></section>
 <section id="formattedColumn" hidden><h3>Su skyrybos ženklais</h3><pre id="formatted"></pre></section>
+<section id="fixedColumn"><h3>Pataisyti žodžiai</h3><pre id="fixed"></pre></section>
 </div>
 <script>
 const URL = 'ws://192.168.68.110:8001/ws/transcribe';
@@ -35,24 +43,36 @@ const fixed = document.getElementById('fixed');
 const spell = document.getElementById('spell');
 const fixedColumn = document.getElementById('fixedColumn');
 let ws, stream, ctx, source, node, silent, stopping = false;
+// Each connection numbers segments from 1, so records are keyed by session too
+// ("Pratęsti" appends to the existing text instead of overwriting it).
+let session = 0;
+const key = seq => session + ':' + seq;
+function updateStartLabel() {
+  start.textContent = records.size ? 'Pratęsti' : 'Pradėti';
+}
 const records = new Map();
 
-function renderFixed(r) {
+function renderPieces(text, pieces) {
   const frag = document.createDocumentFragment();
-  for (const [text, original] of r.pieces || [[r.text, null]]) {
-    if (original === null) { frag.append(text); continue; }
+  for (const [part, original] of pieces || [[text, null]]) {
+    if (original === null) { frag.append(part); continue; }
     const m = document.createElement('mark');
-    m.textContent = text; m.title = 'Buvo: ' + original;
+    m.textContent = part; m.title = 'Buvo: ' + original;
     frag.append(m);
   }
   return frag;
 }
+function renderInto(el, list, pick) {
+  el.replaceChildren();
+  list.forEach((r, i) => { if (i) el.append(' '); el.append(pick(r)); });
+}
+// Server order: raw -> punctuation (if on) -> spelling on the punctuated text
+// (or on raw when punctuation is off). Columns show each stage as it arrives.
 function render() {
   const list = [...records.values()];
   raw.textContent = list.map(r => r.raw).join(' ');
-  fixed.replaceChildren();
-  list.forEach((r, i) => { if (i) fixed.append(' '); fixed.append(renderFixed(r)); });
-  formatted.textContent = list.map(r => r.punct || r.text).join(' ');
+  formatted.textContent = list.map(r => r.punct || r.raw).join(' ');
+  renderInto(fixed, list, r => renderPieces(r.fixed ?? (r.punct || r.raw), r.pieces));
 }
 // Autoscroll: follow the newest text only while the user is at the bottom.
 function nearBottom() {
@@ -72,7 +92,7 @@ spell.onchange = () => setSpelling(spell.checked);
 // Clears shown text; recording continues. Late punctuation for cleared
 // segments is ignored because their records are gone.
 document.getElementById('clear').onclick = () => {
-  records.clear(); partial.textContent = ''; render();
+  records.clear(); partial.textContent = ''; render(); updateStartLabel();
 };
 function setPunctuation(enabled) {
   formattedColumn.hidden = !enabled;
@@ -80,16 +100,24 @@ function setPunctuation(enabled) {
     ws.send(enabled ? 'punctuation_on' : 'punctuation_off');
 }
 punct.onchange = () => setPunctuation(punct.checked);
+// The browser restores checkbox state on reload (after this script may run),
+// so column visibility is synced again on pageshow.
+function syncColumns() {
+  formattedColumn.hidden = !punct.checked;
+  fixedColumn.hidden = !spell.checked;
+}
+syncColumns();
+addEventListener('pageshow', syncColumns);
 async function cleanup() {
   try { source?.disconnect(); node?.disconnect(); silent?.disconnect(); } catch {}
   stream?.getTracks().forEach(t => t.stop());
   if (ctx && ctx.state !== 'closed') await ctx.close();
-  start.disabled = false; stop.disabled = true;
+  start.disabled = false; stop.disabled = true; updateStartLabel();
 }
 start.onclick = async () => {
   try {
     stopping = false;
-    records.clear(); raw.textContent = ''; formatted.textContent = ''; fixed.textContent = '';
+    session++;  // existing text is kept ("Pratęsti"); "Išvalyti" clears it
     partial.textContent = '';
     stream = await navigator.mediaDevices.getUserMedia({audio: {
       echoCancellation: false, noiseSuppression: false, autoGainControl: false
@@ -115,15 +143,19 @@ start.onclick = async () => {
       const msg = JSON.parse(ev.data);
       const follow = nearBottom();
       queueMicrotask(() => { if (follow) scrollToEnd(); });
+      if (msg.type === 'info') document.getElementById('modelName').textContent = ' – ' + msg.model;
       if (msg.type === 'partial') partial.textContent = msg.text;
       if (msg.type === 'final') {
-        records.set(msg.seq, {raw: msg.raw ?? msg.text, text: msg.text,
-                              pieces: msg.pieces, punct: ''});
+        records.set(key(msg.seq), {raw: msg.text, punct: '', fixed: null, pieces: null});
         partial.textContent = ''; render();
       }
       if (msg.type === 'punctuation') {
-        const r = records.get(msg.seq);
-        if (r) {r.punct = msg.text;render();}
+        const r = records.get(key(msg.seq));
+        if (r) {r.punct = msg.text; render();}
+      }
+      if (msg.type === 'spelling') {
+        const r = records.get(key(msg.seq));
+        if (r) {r.fixed = msg.text; r.pieces = msg.pieces; render();}
       }
       if (msg.type === 'punctuation_error') status.textContent = 'Skyrybos klaida – originalas išsaugotas';
       if (msg.type === 'error') status.textContent = msg.message;

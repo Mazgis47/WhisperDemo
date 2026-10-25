@@ -6,8 +6,9 @@ from contextlib import suppress
 
 import numpy as np
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from faster_whisper import WhisperModel
 from faster_whisper.vad import VadOptions, get_speech_timestamps
+
+import asr
 from lt_spell import Corrector
 from punctuation import Punctuator
 
@@ -15,16 +16,15 @@ app = FastAPI()
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger('whisper-live')
 
-SAMPLE_RATE = 16000
-LANGUAGE = 'lt'
-MODEL_NAME = '/home/mp/whisper-models/azuolas-ct2'
-CHECK_EVERY = 0.4
+SAMPLE_RATE = asr.SAMPLE_RATE
+CHECK_EVERY = 0.2
 PARTIAL_EVERY = 2.0
-FINAL_SILENCE = 0.7
+FINAL_SILENCE = 0.5
 MAX_UTTERANCE = 30.0
 MIN_AUDIO = 0.8
 
-model = WhisperModel(MODEL_NAME, device='cuda', compute_type='float16')
+# ASR model from the ASR_MODEL env var: azuolas (default), large-v3, turbo, canary.
+model = asr.load()
 vad_options = VadOptions(threshold=0.5, min_speech_duration_ms=200,
                          min_silence_duration_ms=500, speech_pad_ms=150)
 
@@ -41,35 +41,41 @@ def speech_ranges(samples):
     return get_speech_timestamps(samples, vad_options)
 
 
-def run_whisper(samples, is_final):
-    segments, _ = model.transcribe(
-        samples.astype(np.float32, copy=False), language=LANGUAGE,
-        beam_size=5 if is_final else 1, vad_filter=False,
-        condition_on_previous_text=False, temperature=0.0,
-    )
-    return ' '.join(s.text.strip() for s in segments).strip()
-
-
 @app.websocket('/ws/transcribe')
 async def ws_transcribe(ws: WebSocket):
     await ws.accept()
+    await ws.send_text(json.dumps({'type': 'info', 'model': model.label}, ensure_ascii=False))
     blocks, block_len = [], 0
     last_check = last_partial = 0.0
     seq = 0
     punctuation_enabled = False
     spelling_enabled = True
-    punctuation_jobs = set()
+    post_jobs = set()
 
-    async def punctuate_and_send(sequence, text):
-        try:
-            formatted = await asyncio.to_thread(punctuator, text)
-            await ws.send_text(json.dumps({
-                'type': 'punctuation', 'seq': sequence, 'text': formatted
-            }, ensure_ascii=False))
-        except Exception:
-            log.exception('Punctuation restoration error')
-            with suppress(Exception):
-                await ws.send_json({'type': 'punctuation_error', 'seq': sequence})
+    async def post_process(sequence, raw, do_punct, do_spell):
+        # Punctuation first (it never changes ASR words), then spelling runs on
+        # the punctuated text, or on the raw text when punctuation is off.
+        text = raw
+        if do_punct:
+            try:
+                # Canary punctuates by itself; punctuation.py would only double it.
+                if not model.native_punctuation:
+                    text = await asyncio.to_thread(punctuator, raw)
+                await ws.send_text(json.dumps({
+                    'type': 'punctuation', 'seq': sequence, 'text': text
+                }, ensure_ascii=False))
+            except Exception:
+                log.exception('Punctuation restoration error')
+                with suppress(Exception):
+                    await ws.send_json({'type': 'punctuation_error', 'seq': sequence})
+        if do_spell:
+            try:
+                fixed, pieces = await asyncio.to_thread(corrector.correct, text)
+                await ws.send_text(json.dumps({
+                    'type': 'spelling', 'seq': sequence, 'text': fixed, 'pieces': pieces
+                }, ensure_ascii=False))
+            except Exception:
+                log.exception('Spelling correction error')
 
     async def process(force=False):
         nonlocal blocks, block_len, last_check, last_partial, seq
@@ -92,24 +98,18 @@ async def ws_transcribe(ws: WebSocket):
         end = min(len(samples), ranges[-1]['end'] + int(0.2 * SAMPLE_RATE))
         audio = samples[start:end]
         async with inference_lock:
-            text = await asyncio.to_thread(run_whisper, audio, is_final)
+            text = await asyncio.to_thread(model.transcribe, audio, is_final)
         if text:
             if is_final:
                 seq += 1
-                raw, pieces = text, None
-                if spelling_enabled:
-                    try:
-                        text, pieces = await asyncio.to_thread(corrector.correct, raw)
-                    except Exception:
-                        log.exception('Spelling correction error')
                 await ws.send_text(json.dumps({
-                    'type': 'final', 'seq': seq, 'text': text, 'raw': raw,
-                    'pieces': pieces
+                    'type': 'final', 'seq': seq, 'text': text
                 }, ensure_ascii=False))
-                if punctuation_enabled:
-                    job = asyncio.create_task(punctuate_and_send(seq, text))
-                    punctuation_jobs.add(job)
-                    job.add_done_callback(punctuation_jobs.discard)
+                if punctuation_enabled or spelling_enabled:
+                    job = asyncio.create_task(post_process(
+                        seq, text, punctuation_enabled, spelling_enabled))
+                    post_jobs.add(job)
+                    job.add_done_callback(post_jobs.discard)
             else:
                 await ws.send_text(json.dumps({
                     'type': 'partial', 'text': text
@@ -136,8 +136,8 @@ async def ws_transcribe(ws: WebSocket):
                 continue
             if message.get('text') == 'stop':
                 await process(force=True)
-                if punctuation_jobs:
-                    await asyncio.gather(*punctuation_jobs, return_exceptions=True)
+                if post_jobs:
+                    await asyncio.gather(*post_jobs, return_exceptions=True)
                 await ws.send_json({'type': 'stopped'})
                 break
             data = message.get('bytes')
@@ -160,7 +160,7 @@ async def ws_transcribe(ws: WebSocket):
         with suppress(Exception):
             await ws.send_json({'type': 'error', 'message': 'Transkripcijos klaida serveryje'})
     finally:
-        for job in punctuation_jobs:
+        for job in post_jobs:
             job.cancel()
         with suppress(Exception):
             await ws.close()
